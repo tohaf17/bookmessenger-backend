@@ -1,0 +1,8 @@
+{
+    "appService.zipIgnorePattern": [
+        "node_modules{,/**}",
+        ".vscode{,/**}"
+    ],
+    "appService.defaultWebAppToDeploy": "/subscriptions/b516e5e0-7ecd-4317-8518-9cd4bd581c27/resourceGroups/rg-bookmessenger/providers/Microsoft.Web/sites/bookmessenger",
+    "appService.deploySubpath": "."
+}

@@ -149,10 +149,16 @@ export class BookService {
     return new BookResponse(book);
   }
 
-  async searchGoogleBooks(query: string): Promise<GoogleBookResponse[]> {
-    const volumes = await this.searchGoogleBooksApi(query, 10);
+  async searchGoogleBooks(
+    query: string,
+    page = 1,
+    quantity = 10,
+  ): Promise<{ items: GoogleBookResponse[]; totalItems: number }> {
+    const startIndex = (page - 1) * quantity;
+    const data = await this.searchGoogleBooksApi(query, quantity, startIndex);
 
-    return volumes
+    const volumes = data.items ?? [];
+    const mapped = volumes
       .filter((volume) => volume.volumeInfo?.title)
       .map((volume): GoogleBookResponse => {
         const volumeInfo = volume.volumeInfo!;
@@ -166,6 +172,19 @@ export class BookService {
           totalPages: volumeInfo.pageCount,
         };
       });
+
+    return { items: mapped, totalItems: data.totalItems ?? mapped.length };
+  }
+
+  async getAllGenres(): Promise<string[]> {
+    const genres = await this.bookRepository
+      .createQueryBuilder('book')
+      .select('DISTINCT book.genre', 'genre')
+      .where('book.genre IS NOT NULL AND book.genre != :empty', { empty: '' })
+      .orderBy('genre', 'ASC')
+      .getRawMany<{ genre: string }>();
+
+    return genres.map((g) => g.genre).filter(Boolean);
   }
 
   private async findCoverByTitle(title: string): Promise<string | null> {
@@ -177,26 +196,27 @@ export class BookService {
   private async searchGoogleBooksApi(
     query: string,
     limit: number,
-  ): Promise<GoogleBooksVolume[]> {
+    startIndex = 0,
+  ): Promise<GoogleBooksSearchResponse> {
     try {
       const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
       if (!apiKey) {
         console.warn('GOOGLE_BOOKS_API_KEY is not set. Some features may not work.');
-        return [];
+        return { items: [], totalItems: 0 };
       }
 
       const encodedQuery = encodeURIComponent(query);
-      const url = `https://www.googleapis.com/books/v1/volumes?q=${encodedQuery}&maxResults=${Math.min(limit, 40)}&key=${apiKey}`;
+      const url = `https://www.googleapis.com/books/v1/volumes?q=${encodedQuery}&startIndex=${startIndex}&maxResults=${Math.min(limit, 40)}&key=${apiKey}`;
       
       const { data } = await axios.get<GoogleBooksSearchResponse>(url);
-      return data.items ?? [];
+      return data ?? { items: [], totalItems: 0 };
     } catch (error) {
       if (error instanceof Error) {
         console.error('Error fetching data from Google Books API:', error.message);
       } else {
         console.error('Error fetching data from Google Books API:', error);
       }
-      return [];
+      return { items: [], totalItems: 0 };
     }
   }
 

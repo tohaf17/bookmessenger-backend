@@ -61,11 +61,26 @@ export class BookController {
   }
 
   @Get('search/google')
-  @ApiOperation({ summary: 'Search books via Open Library' })
+  @ApiOperation({ summary: 'Search books via Google Books' })
   @ApiQuery({ name: 'q', required: true, type: String, description: 'Search query' })
-  @ApiOkResponse({ type: [GoogleBookResponse] })
-  searchGoogle(@Query('q') query: string) {
-    return this.bookService.searchGoogleBooks(query);
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'quantity', required: false, type: Number, example: 10 })
+  @ApiOkResponse({ description: 'Paginated Google Books results' })
+  searchGoogle(
+    @Query('q') query: string,
+    @Query('page') page?: string,
+    @Query('quantity') quantity?: string,
+  ) {
+    const p = page ? Number(page) : 1;
+    const qn = quantity ? Number(quantity) : 10;
+    return this.bookService.searchGoogleBooks(query, p, qn);
+  }
+
+  @Get('genres')
+  @ApiOperation({ summary: 'Get distinct book genres' })
+  @ApiOkResponse({ type: [String] })
+  getGenres() {
+    return this.bookService.getAllGenres();
   }
 
   @Get(':id/details')

@@ -36,19 +36,23 @@ export class CommentService {
 
   async findAll(
     params: PaginationRequest,
-    bookId: number,
+    bookId?: number,
   ): Promise<PaginatedResponse<CommentResponse>> {
     const page = params.page ?? 1;
     const quantity = params.quantity ?? 10;
     const skip = (page - 1) * quantity;
-    
+
+    const where = bookId
+      ? { book: { id: bookId }, parent: IsNull() }
+      : { parent: IsNull() };
+
     const [comments, commentsCount] = await this.commentRepository.findAndCount(
       {
         take: quantity,
         skip,
         order: { id: 'DESC' },
-        where:{book:{id:bookId}, parent: IsNull()},
-        relations: { user: true , replies: { user: true } },
+        where,
+        relations: { user: true, book: true, replies: { user: true, book: true } },
       },
     );
 
@@ -106,7 +110,7 @@ export class CommentService {
   private async findCommentEntity(id: number): Promise<Comment> {
     const comment = await this.commentRepository.findOne({ 
       where: { id },
-      relations: { user: true, replies: { user: true } }, 
+      relations: { user: true, book: true, replies: { user: true, book: true } }, 
     });
 
     if (!comment) {

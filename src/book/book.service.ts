@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios from 'axios';
-import { Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { Comment } from '../comment/comment.entity';
 import { PaginatedResponse } from '../common/responses/paginationResponse';
 import { Book } from './book.entity';
@@ -60,6 +60,7 @@ export class BookService {
     private readonly commentRepository: Repository<Comment>,
     @InjectRepository(UserBook)
     private readonly userBookRepository: Repository<UserBook>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(data: CreateBookRequest): Promise<BookResponse> {
@@ -145,7 +146,25 @@ export class BookService {
 
   async remove(id: number): Promise<BookResponse> {
     const book = await this.findBookEntity(id);
-    await this.bookRepository.remove(book);
+    await this.dataSource.transaction(async (manager) => {
+      const commentRepo = manager.getRepository(Comment);
+      const reviewRepo = manager.getRepository(Review);
+      const userBookRepo = manager.getRepository(UserBook);
+      const bookRepo = manager.getRepository(Book);
+
+      const rootComments = await commentRepo.find({
+        where: { bookId: id, parent: IsNull() },
+        relations: { replies: true },
+      });
+
+      for (const comment of rootComments) {
+        await this.removeCommentTree(comment, commentRepo);
+      }
+
+      await reviewRepo.delete({ bookId: id });
+      await userBookRepo.delete({ bookId: id });
+      await bookRepo.delete({ id });
+    });
     return new BookResponse(book);
   }
 
@@ -228,5 +247,21 @@ export class BookService {
     }
 
     return book;
+  }
+
+  private async removeCommentTree(
+    comment: Comment,
+    commentRepository: Repository<Comment>,
+  ): Promise<void> {
+    const children = await commentRepository
+      .createQueryBuilder('comment')
+      .where('comment.parentId = :id', { id: comment.id })
+      .getMany();
+
+    for (const child of children) {
+      await this.removeCommentTree(child, commentRepository);
+    }
+
+    await commentRepository.remove(comment);
   }
 }

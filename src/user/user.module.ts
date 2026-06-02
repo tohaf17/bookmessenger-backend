@@ -7,8 +7,11 @@ import { MailModule } from '../mail/mail.module';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserBook } from '../userBook/userBook.entity';
 import { Review } from '../review/review.entity';
+import { Comment } from '../comment/comment.entity';
+import { Tracker } from '../tracker/tracker.entity';
+import { TrackerItem } from '../trackerItem/trackerItem.entity';
 @Module({
-  imports: [TypeOrmModule.forFeature([User, UserBook, Review]),MailModule],
+  imports: [TypeOrmModule.forFeature([User, UserBook, Review, Comment, Tracker, TrackerItem]), MailModule],
   controllers: [UserController],
   providers: [UserService, RolesGuard],
   exports: [UserService],

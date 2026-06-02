@@ -1,12 +1,13 @@
 import {
   ForbiddenException,
   Injectable,
+  OnModuleInit,
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcryptjs';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { PaginationRequest } from '../common/requests/paginationDto';
 import { PaginatedResponse } from '../common/responses/paginationResponse';
 import { CreateUserRequest } from './requests/create-user.request';
@@ -17,6 +18,9 @@ import { User } from './user.entity';
 import { MailService } from '../mail/mail.service';
 import { UserBook } from '../userBook/userBook.entity';
 import { Review } from '../review/review.entity';
+import { Comment } from '../comment/comment.entity';
+import { Tracker } from '../tracker/tracker.entity';
+import { TrackerItem } from '../trackerItem/trackerItem.entity';
 import { UserStatsResponse } from './responses/user-stats.response';
 
 type CreateUserData = {
@@ -31,6 +35,8 @@ type CreateUserData = {
 
 @Injectable()
 export class UserService {
+  private readonly defaultAdminEmail = 'admin@bookmessenger';
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -38,8 +44,19 @@ export class UserService {
     private readonly userBookRepository: Repository<UserBook>,
     @InjectRepository(Review)
     private readonly reviewRepository: Repository<Review>,
+    @InjectRepository(Comment)
+    private readonly commentRepository: Repository<Comment>,
+    @InjectRepository(Tracker)
+    private readonly trackerRepository: Repository<Tracker>,
+    @InjectRepository(TrackerItem)
+    private readonly trackerItemRepository: Repository<TrackerItem>,
+    private readonly dataSource: DataSource,
     private readonly mailService: MailService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.ensureDefaultAdmin();
+  }
 
   async create(data: CreateUserRequest): Promise<UserResponse> {
     const user = await this.createUser(data);
@@ -238,6 +255,7 @@ export class UserService {
   ): Promise<UserResponse> {
     this.assertSelfOrAdmin(id, currentUserId, currentUserRole);
     const user = await this.findUserEntity(id);
+    this.assertNotDefaultAdmin(user);
     Object.assign(user, {
       ...data,
       email: data.email ? data.email.toLowerCase() : user.email,
@@ -256,6 +274,8 @@ export class UserService {
   ): Promise<UserResponse> {
     this.assertSelfOrAdmin(id, currentUserId, currentUserRole);
     const user = await this.findUserEntity(id);
+    this.assertNotDefaultAdmin(user);
+    await this.removeUserDependencies(id);
     await this.userRepository.remove(user);
     return new UserResponse(user);
   }
@@ -280,5 +300,84 @@ export class UserService {
     }
 
     throw new ForbiddenException('You can modify only your own user');
+  }
+
+  private async ensureDefaultAdmin(): Promise<void> {
+    const adminPassword = 'adminpassword123';
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+
+    await this.dataSource.transaction(async (manager) => {
+      const userRepo = manager.getRepository(User);
+      const existingAdmin = await userRepo.findOne({
+        where: { email: this.defaultAdminEmail },
+      });
+
+      if (existingAdmin) {
+        existingAdmin.password = hashedPassword;
+        existingAdmin.role = UserRole.Admin;
+        existingAdmin.name = existingAdmin.name || 'Admin';
+        existingAdmin.surname = existingAdmin.surname || 'BookMessenger';
+        existingAdmin.language = existingAdmin.language || 'uk';
+        await userRepo.save(existingAdmin);
+      } else {
+        await userRepo.save(
+          userRepo.create({
+            email: this.defaultAdminEmail,
+            password: hashedPassword,
+            name: 'Admin',
+            surname: 'BookMessenger',
+            language: 'uk',
+            role: UserRole.Admin,
+            createdAt: new Date(),
+          }),
+        );
+      }
+
+      const otherAdmins = await userRepo.find({
+        where: { role: UserRole.Admin },
+      });
+
+      const staleAdmins = otherAdmins.filter((user) => user.email !== this.defaultAdminEmail);
+      for (const staleAdmin of staleAdmins) {
+        staleAdmin.role = UserRole.User;
+        await userRepo.save(staleAdmin);
+      }
+    });
+  }
+
+  private async removeUserDependencies(userId: number): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'DELETE FROM "user_followers" WHERE "userId" = $1 OR "followerId" = $1',
+        [userId],
+      );
+
+      const commentRepo = manager.getRepository(Comment);
+      const reviewRepo = manager.getRepository(Review);
+      const userBookRepo = manager.getRepository(UserBook);
+      const trackerRepo = manager.getRepository(Tracker);
+      const trackerItemRepo = manager.getRepository(TrackerItem);
+
+      const trackers = await trackerRepo.find({ where: { userId } });
+      if (trackers.length > 0) {
+        const trackerIds = trackers.map((tracker) => tracker.id);
+        await trackerItemRepo
+          .createQueryBuilder()
+          .delete()
+          .where('trackerId IN (:...trackerIds)', { trackerIds })
+          .execute();
+      }
+
+      await commentRepo.delete({ userId });
+      await reviewRepo.delete({ userId });
+      await userBookRepo.delete({ userId });
+      await trackerRepo.delete({ userId });
+    });
+  }
+
+  private assertNotDefaultAdmin(user: User): void {
+    if (user.email === this.defaultAdminEmail) {
+      throw new ForbiddenException('Default admin account cannot be modified');
+    }
   }
 }

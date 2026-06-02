@@ -29,7 +29,7 @@ export class UserResponse {
     this.email = user.email;
     this.name = user.name;
     this.surname = user.surname;
-    this.role = user.role;
+    this.role = String(user.role).toLowerCase() as UserRole;
     this.avatarUrl = user.avatarUrl;
     this.createdAt = user.createdAt;
   }

@@ -35,7 +35,7 @@ export class Comment {
   @Column()
   createdAt!: Date;
 
-  @TreeParent()
+  @TreeParent({ onDelete: 'CASCADE' })
   parent!: Comment;
 
   @TreeChildren()

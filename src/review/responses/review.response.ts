@@ -18,7 +18,20 @@ export class ReviewResponse {
   content!: string;
 
   @ApiProperty()
+  likesCount!: number;
+
+  @ApiProperty()
+  dislikesCount!: number;
+
+  @ApiProperty()
   createdAt!: Date;
+
+  @ApiPropertyOptional()
+  book?: {
+    id: number;
+    title: string;
+    authorName: string;
+  };
 
   @ApiPropertyOptional()
   user?: {
@@ -33,7 +46,16 @@ export class ReviewResponse {
     this.bookId = review.bookId;
     this.rating = review.rating;
     this.content = review.text;
+    this.likesCount = review.likesCount ?? 0;
+    this.dislikesCount = review.dislikesCount ?? 0;
     this.createdAt = review.createdAt;
+    if (review.book) {
+      this.book = {
+        id: review.book.id,
+        title: review.book.title,
+        authorName: review.book.authorName,
+      };
+    }
     if (review.user) {
       this.user = {
         id: review.user.id,

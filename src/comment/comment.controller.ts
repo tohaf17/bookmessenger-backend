@@ -23,7 +23,6 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ApiPaginatedResponse } from '../common/decorators/api-paginated-response.decorator';
-import { UserRole } from '../user/user-role.enum';
 import { PaginationRequest } from '../common/requests/paginationDto';
 import { CommentService } from './comment.service';
 import { CreateCommentRequest } from './requests/create-comment.request';
@@ -49,14 +48,14 @@ export class CommentController {
   @ApiOperation({ summary: 'Get comments with pagination' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'quantity', required: false, type: Number, example: 10 })
-  @ApiQuery({ name: 'bookId', required: true, type: Number })
+  @ApiQuery({ name: 'bookId', required: false, type: Number })
   @ApiPaginatedResponse(CommentResponse)
   findAll(
     @Query() params: PaginationRequest,
-    @Query('bookId', ParseIntPipe) bookId: number,
+    @Query('bookId') bookId?: string,
   ) {
-    
-    return this.commentService.findAll(params, bookId);
+    const parsedBookId = bookId ? Number(bookId) : undefined;
+    return this.commentService.findAll(params, parsedBookId);
   }
 
   @Get(':id')

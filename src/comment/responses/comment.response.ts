@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Comment } from '../comment.entity';
 
 export class CommentResponse {
@@ -20,6 +20,13 @@ export class CommentResponse {
   @ApiProperty({ type: () => [CommentResponse], description: 'Список відповідей на коментар' })
   replies!: CommentResponse[];
 
+  @ApiPropertyOptional()
+  book?: {
+    id: number;
+    title: string;
+    authorName: string;
+  };
+
   @ApiProperty()
   user?: {
     id: number;
@@ -36,6 +43,13 @@ export class CommentResponse {
     this.replies = comment.replies
       ? comment.replies.map((reply) => new CommentResponse(reply))
       : [];
+    if (comment.book) {
+      this.book = {
+        id: comment.book.id,
+        title: comment.book.title,
+        authorName: comment.book.authorName,
+      };
+    }
     if (comment.user) {
       this.user = {
         id: comment.user.id,

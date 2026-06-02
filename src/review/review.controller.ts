@@ -60,6 +60,22 @@ export class ReviewController {
     return this.reviewService.findOne(id);
   }
 
+  @Post(':id/like')
+  @ApiOperation({ summary: 'Mark review as helpful' })
+  @ApiOkResponse({ type: ReviewResponse })
+  @ApiNotFoundResponse({ description: 'Review not found' })
+  like(@Param('id', ParseIntPipe) id: number) {
+    return this.reviewService.like(id);
+  }
+
+  @Post(':id/dislike')
+  @ApiOperation({ summary: 'Mark review as not helpful' })
+  @ApiOkResponse({ type: ReviewResponse })
+  @ApiNotFoundResponse({ description: 'Review not found' })
+  dislike(@Param('id', ParseIntPipe) id: number) {
+    return this.reviewService.dislike(id);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'Update review by id' })
   @ApiOkResponse({ type: ReviewResponse })
@@ -77,6 +93,6 @@ export class ReviewController {
   @ApiOkResponse({ type: ReviewResponse })
   @ApiNotFoundResponse({ description: 'Review not found' })
   remove(@Param('id', ParseIntPipe) id: number, @Request() req: AuthRequest) {
-    return this.reviewService.remove(id, req.user.id);
+    return this.reviewService.remove(id, req.user.id, req.user.role);
   }
 }

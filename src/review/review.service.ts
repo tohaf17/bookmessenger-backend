@@ -11,6 +11,7 @@ import { CreateReviewRequest } from './requests/create-review.request';
 import { UpdateReviewRequest } from './requests/update-review.request';
 import { ReviewResponse } from './responses/review.response';
 import { Review } from './review.entity';
+import { UserRole } from '../user/user-role.enum';
 
 @Injectable()
 export class ReviewService {
@@ -40,7 +41,7 @@ export class ReviewService {
     const quantity = params.quantity ?? 10;
     const skip = (page - 1) * quantity;
     const [reviews, reviewsCount] = await this.reviewRepository.findAndCount({
-      relations: { user: true },
+      relations: { user: true, book: true },
       take: quantity,
       skip,
       order: { id: 'DESC' },
@@ -62,6 +63,14 @@ export class ReviewService {
     return new ReviewResponse(review);
   }
 
+  async like(id: number): Promise<ReviewResponse> {
+    return this.updateHelpfulness(id, 'likesCount');
+  }
+
+  async dislike(id: number): Promise<ReviewResponse> {
+    return this.updateHelpfulness(id, 'dislikesCount');
+  }
+
   async update(
     id: number,
     data: UpdateReviewRequest,
@@ -74,17 +83,27 @@ export class ReviewService {
     return new ReviewResponse(await this.findReviewEntity(id));
   }
 
-  async remove(id: number, userId: number): Promise<ReviewResponse> {
+  async remove(id: number, userId: number, userRole: UserRole): Promise<ReviewResponse> {
     const review = await this.findReviewEntity(id);
-    this.assertOwner(review, userId);
+    this.assertOwnerOrAdmin(review, userId, userRole);
     await this.reviewRepository.remove(review);
     return new ReviewResponse(review);
+  }
+
+  private async updateHelpfulness(
+    id: number,
+    field: 'likesCount' | 'dislikesCount',
+  ): Promise<ReviewResponse> {
+    const review = await this.findReviewEntity(id);
+    review[field] = (review[field] ?? 0) + 1;
+    await this.reviewRepository.save(review);
+    return new ReviewResponse(await this.findReviewEntity(id));
   }
 
   private async findReviewEntity(id: number): Promise<Review> {
     const review = await this.reviewRepository.findOne({
       where: { id },
-      relations: { user: true },
+      relations: { user: true, book: true },
     });
 
     if (!review) {
@@ -96,6 +115,14 @@ export class ReviewService {
 
   private assertOwner(review: Review, userId: number): void {
     if (review.userId === userId) {
+      return;
+    }
+
+    throw new ForbiddenException('You can modify only your own reviews');
+  }
+
+  private assertOwnerOrAdmin(review: Review, userId: number, userRole: UserRole): void {
+    if (review.userId === userId || userRole === UserRole.Admin) {
       return;
     }
 

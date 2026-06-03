@@ -37,6 +37,9 @@ import path from 'path';
           autoLoadEntities: true,
           synchronize: !isProduction, 
           logging: isProduction ? ['error'] : ['query', 'error'],
+          ssl: {
+            rejectUnauthorized: false,
+          },
         };
       },
     }),

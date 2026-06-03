@@ -37,9 +37,12 @@ import path from 'path';
           autoLoadEntities: true,
           synchronize: true, 
           logging: isProduction ? ['error'] : ['query', 'error'],
-          ssl: {
-            rejectUnauthorized: false,
-          },
+          ssl: true,
+            extra: {
+              ssl: {
+                rejectUnauthorized: false, // дозволяє підключення до Neon без локального сертифіката
+              },
+            },
         };
       },
     }),

@@ -39,16 +39,24 @@ export class ReviewService {
 
   async findAll(
     params: PaginationRequest,
+    bookId?: number,
   ): Promise<PaginatedResponse<ReviewResponse>> {
     const page = params.page ?? 1;
     const quantity = params.quantity ?? 10;
     const skip = (page - 1) * quantity;
-    const [reviews, reviewsCount] = await this.reviewRepository.findAndCount({
-      relations: { user: true, book: true },
-      take: quantity,
-      skip,
-      order: { id: 'DESC' },
-    });
+    const queryBuilder = this.reviewRepository
+      .createQueryBuilder('review')
+      .leftJoinAndSelect('review.user', 'user')
+      .leftJoinAndSelect('review.book', 'book')
+      .take(quantity)
+      .skip(skip)
+      .orderBy('review.id', 'DESC');
+
+    if (bookId) {
+      queryBuilder.where('review.bookId = :bookId', { bookId });
+    }
+
+    const [reviews, reviewsCount] = await queryBuilder.getManyAndCount();
 
     return {
       data: reviews.map((review) => new ReviewResponse(review)),

@@ -47,9 +47,14 @@ export class ReviewController {
   @ApiOperation({ summary: 'Get reviews with pagination' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'quantity', required: false, type: Number, example: 10 })
+  @ApiQuery({ name: 'bookId', required: false, type: Number })
   @ApiPaginatedResponse(ReviewResponse)
-  findAll(@Query() params: PaginationRequest) {
-    return this.reviewService.findAll(params);
+  findAll(
+    @Query() params: PaginationRequest,
+    @Query('bookId') bookId?: string,
+  ) {
+    const parsedBookId = bookId ? Number(bookId) : undefined;
+    return this.reviewService.findAll(params, parsedBookId);
   }
 
   @Get(':id')

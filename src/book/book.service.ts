@@ -63,6 +63,7 @@ export class BookService {
     new BookAuthorFilterStrategy(),
   ];
   private readonly cacheTTL:number = 3600;
+  private readonly redisTimeoutMs = 300;
   private readonly redisClient: RedisClientType;
 
   constructor(
@@ -89,20 +90,12 @@ export class BookService {
     const cacheKey = `book:${id}:details-counters`;
     let counters: Details | null = null;
 
-    try {
-      const cached = await this.redisClient.get(cacheKey);
-      if (cached) counters = JSON.parse(cached);
-    } catch (err) {
-      console.error('Redis error:', err);
-    }
+    const cached = await this.getDetailsCountersFromCache(cacheKey);
+    if (cached) counters = cached;
 
     if (!counters) {
       counters = await this.getDetailsCountersFromDB(id);
-      try {
-        await this.redisClient.set(cacheKey, JSON.stringify(counters), { EX: this.cacheTTL });
-      } catch (err) {
-        console.error('Redis save error:', err);
-      }
+      await this.setDetailsCountersToCache(cacheKey, counters);
     }
 
     const currentUserBook = await this.userBookRepository.findOne({ where: { bookId: id, userId } });
@@ -121,11 +114,7 @@ export class BookService {
 
   async invalidateBookCache(bookId: number): Promise<void> {
     const cacheKey = `book:${bookId}:details-counters`;
-    try {
-      await this.redisClient.del(cacheKey);
-    } catch (err) {
-      console.error(`Failed to invalidate cache for book ${bookId}:`, err);
-    }
+    await this.deleteDetailsCountersFromCache(cacheKey, bookId);
   }
 
   async create(data: CreateBookRequest): Promise<BookResponse> {
@@ -336,5 +325,82 @@ export class BookService {
       wantToReadCount: Number(userBookStats?.want ?? 0),
       alreadyReadCount: Number(userBookStats?.read ?? 0),
     };
+  }
+
+  private async getDetailsCountersFromCache(
+    cacheKey: string,
+  ): Promise<Details | null> {
+    if (!this.redisClient.isReady) {
+      return null;
+    }
+
+    try {
+      const cached = await this.withTimeout(
+        this.redisClient.get(cacheKey),
+        this.redisTimeoutMs,
+      );
+
+      return cached ? (JSON.parse(cached) as Details) : null;
+    } catch (err) {
+      console.error(`Redis cache read failed for ${cacheKey}:`, err);
+      return null;
+    }
+  }
+
+  private async setDetailsCountersToCache(
+    cacheKey: string,
+    counters: Details,
+  ): Promise<void> {
+    if (!this.redisClient.isReady) {
+      return;
+    }
+
+    try {
+      await this.withTimeout(
+        this.redisClient.set(cacheKey, JSON.stringify(counters), {
+          EX: this.cacheTTL,
+        }),
+        this.redisTimeoutMs,
+      );
+    } catch (err) {
+      console.error(`Redis cache write failed for ${cacheKey}:`, err);
+    }
+  }
+
+  private async deleteDetailsCountersFromCache(
+    cacheKey: string,
+    bookId: number,
+  ): Promise<void> {
+    if (!this.redisClient.isReady) {
+      return;
+    }
+
+    try {
+      await this.withTimeout(this.redisClient.del(cacheKey), this.redisTimeoutMs);
+    } catch (err) {
+      console.error(`Failed to invalidate cache for book ${bookId}:`, err);
+    }
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+  ): Promise<T> {
+    let timeout: NodeJS.Timeout | null = null;
+
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeout = setTimeout(() => {
+            reject(new Error(`Redis operation timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
   }
 }

@@ -6,9 +6,10 @@ import { UserBookService } from './userBook.service';
 import { Tracker } from '../tracker/tracker.entity';
 import { TrackerItem } from '../trackerItem/trackerItem.entity';
 import { MeController } from '../me/me.controller';
+import { BookModule } from '../book/book.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserBook, Tracker, TrackerItem])],
+  imports: [TypeOrmModule.forFeature([UserBook, Tracker, TrackerItem]),BookModule],
   controllers: [UserBookController, MeController],
   providers: [UserBookService],
   exports: [UserBookService],

@@ -10,6 +10,7 @@ import { UserBookQueryRequest } from './requests/user-book-query.request';
 import { UserBookResponse } from './responses/user-book.response';
 import { UserBook } from './userBook.entity';
 import { UserBookStatus } from './requests/create-user-book.request';
+import { BookService } from '../book/book.service';
 
 @Injectable()
 export class UserBookService {
@@ -20,6 +21,7 @@ export class UserBookService {
     private readonly trackerRepository: Repository<Tracker>,
     @InjectRepository(TrackerItem)
     private readonly trackerItemRepository: Repository<TrackerItem>,
+    private readonly bookService: BookService,
   ) {}
 
   async create(
@@ -106,6 +108,7 @@ export class UserBookService {
     const userBook = await this.findUserBookEntity(id, userId);
     await this.removeBeforeUserBookDelete(userBook.id, userId);
     await this.userBookRepository.remove(userBook);
+    await this.invalidateBookAnalytics(userBook.bookId);
     return new UserBookResponse(userBook);
   }
 
@@ -126,34 +129,51 @@ export class UserBookService {
   }
 
   private async addToTrackerIfRead(userBook: UserBook): Promise<void> {
-    const tracker = await this.trackerRepository.findOne({
-      where: { userId: userBook.userId },
-    });
+    const [tracker] = await Promise.all([
+      this.trackerRepository.findOne({ where: { userId: userBook.userId } }),
+      this.invalidateBookAnalytics(userBook.bookId),
+    ]);
 
-    if (!tracker) {
-      return; 
-    }
+    if (!tracker) return;
 
     const existingTrackerItem = await this.trackerItemRepository.findOne({
-      where: {
-        trackerId: tracker.id,
-        userBookId: userBook.id,
-      },
+      where: { trackerId: tracker.id, userBookId: userBook.id },
     });
 
     if (userBook.status === UserBookStatus.Read) {
-      if (!existingTrackerItem) {
-        await this.trackerItemRepository.save(
-          this.trackerItemRepository.create({
-            trackerId: tracker.id,
-            userBookId: userBook.id,
-          }),
-        );
-      }
+      await this.handleStatusRead(tracker.id, userBook.id, existingTrackerItem);
     } else {
-      if (existingTrackerItem) {
-        await this.trackerItemRepository.remove(existingTrackerItem);
-      }
+      await this.handleStatusUnread(existingTrackerItem);
+    }
+  }
+
+  private async handleStatusRead(
+    trackerId: number,
+    userBookId: number,
+    existingItem: TrackerItem | null,
+  ): Promise<void> {
+    if (!existingItem) {
+      const newItem = this.trackerItemRepository.create({
+        trackerId,
+        userBookId,
+      });
+      await this.trackerItemRepository.save(newItem);
+    }
+  }
+
+  private async handleStatusUnread(
+    existingItem: TrackerItem | null,
+  ): Promise<void> {
+    if (existingItem) {
+      await this.trackerItemRepository.remove(existingItem);
+    }
+  }
+
+  private async invalidateBookAnalytics(bookId: number): Promise<void> {
+    try {
+      await this.bookService.invalidateBookCache(bookId);
+    } catch (err) {
+      console.error(`Failed to clear analytics cache for book ${bookId}:`, err);
     }
   }
 

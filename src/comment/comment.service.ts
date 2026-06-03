@@ -12,12 +12,14 @@ import { CreateCommentRequest } from './requests/create-comment.request';
 import { UpdateCommentRequest } from './requests/update-comment.request';
 import { CommentResponse } from './responses/comment.response';
 import { UserRole } from '../user/user-role.enum';
+import { BookService } from '../book/book.service';
 
 @Injectable()
 export class CommentService {
   constructor(
     @InjectRepository(Comment)
     private readonly commentRepository: TreeRepository<Comment>,
+    private readonly bookService: BookService,
   ) {}
 
   async create(
@@ -31,6 +33,7 @@ export class CommentService {
     });
 
     await this.commentRepository.save(comment);
+    await this.bookService.invalidateBookCache(data.bookId);
     return new CommentResponse(await this.findCommentEntity(comment.id));
   }
 
@@ -75,6 +78,7 @@ export class CommentService {
       createdAt: new Date(),
     });
     await this.commentRepository.save(reply);
+    await this.bookService.invalidateBookCache(bookId);
     return new CommentResponse(await this.findCommentEntity(reply.id));
   }
 
@@ -93,6 +97,7 @@ export class CommentService {
     this.assertOwnerOrAdmin(comment, userId, userRole);
     Object.assign(comment, data);
     await this.commentRepository.save(comment);
+    await this.bookService.invalidateBookCache(comment.bookId);
     return new CommentResponse(await this.findCommentEntity(id));
   }
 
@@ -104,6 +109,7 @@ export class CommentService {
     const comment = await this.findCommentEntity(id);
     this.assertOwnerOrAdmin(comment, userId, userRole);
     await this.removeCommentTree(comment);
+    await this.bookService.invalidateBookCache(comment.bookId);
     return new CommentResponse(comment);
   }
 

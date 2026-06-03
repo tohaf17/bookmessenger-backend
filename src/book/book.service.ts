@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios from 'axios';
+import {createClient} from 'redis';
 import { DataSource, IsNull, Repository } from 'typeorm';
-import { Comment } from '../comment/comment.entity';
+import {Comment} from '../comment/comment.entity';
 import { PaginatedResponse } from '../common/responses/paginationResponse';
 import { Book } from './book.entity';
 import { BookFilterStrategy } from './filters/book-filter-strategy';
@@ -17,6 +18,8 @@ import { BookResponse } from './responses/book.response';
 import { GoogleBookResponse } from './responses/google-book.response';
 import { Review } from '../review/review.entity';
 import { UserBook } from '../userBook/userBook.entity';
+import {AnalyticsBookResponse} from './responses/analytics-book.response';
+import { RedisClientType } from 'redis';
 
 type GoogleBooksVolumeInfo = {
   title?: string;
@@ -34,6 +37,7 @@ type GoogleBooksVolumeInfo = {
   }>;
 };
 
+
 type GoogleBooksVolume = {
   volumeInfo?: GoogleBooksVolumeInfo;
 };
@@ -42,6 +46,14 @@ type GoogleBooksSearchResponse = {
   items?: GoogleBooksVolume[];
   totalItems?: number;
 };
+type Details={
+  reviewsCount: number,
+      averageRating: number,
+      commentsCount: number,
+      readRightNowCount: number,
+      wantToReadCount: number,
+      alreadyReadCount: number,
+}
 
 @Injectable()
 export class BookService {
@@ -50,6 +62,8 @@ export class BookService {
     new BookGenreFilterStrategy(),
     new BookAuthorFilterStrategy(),
   ];
+  private readonly cacheTTL:number = 3600;
+  private readonly redisClient: RedisClientType;
 
   constructor(
     @InjectRepository(Book)
@@ -61,7 +75,58 @@ export class BookService {
     @InjectRepository(UserBook)
     private readonly userBookRepository: Repository<UserBook>,
     private readonly dataSource: DataSource,
-  ) {}
+  ) {
+    this.redisClient = createClient({
+      url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+    });
+    this.redisClient.connect().catch((err) => {
+      console.error('Failed to connect to Redis:', err);
+    });
+  }
+
+  async findDetails(id: number, userId: number): Promise<BookDetailsResponse> {
+    const book = await this.findBookEntity(id);
+    const cacheKey = `book:${id}:details-counters`;
+    let counters: Details | null = null;
+
+    try {
+      const cached = await this.redisClient.get(cacheKey);
+      if (cached) counters = JSON.parse(cached);
+    } catch (err) {
+      console.error('Redis error:', err);
+    }
+
+    if (!counters) {
+      counters = await this.getDetailsCountersFromDB(id);
+      try {
+        await this.redisClient.set(cacheKey, JSON.stringify(counters), { EX: this.cacheTTL });
+      } catch (err) {
+        console.error('Redis save error:', err);
+      }
+    }
+
+    const currentUserBook = await this.userBookRepository.findOne({ where: { bookId: id, userId } });
+
+    return new BookDetailsResponse({ 
+      book, 
+      reviewsCount: counters!.reviewsCount,
+      averageRating: counters!.averageRating,
+      commentsCount: counters!.commentsCount,
+      readRightNowCount: counters!.readRightNowCount,
+      wantToReadCount: counters!.wantToReadCount,
+      alreadyReadCount: counters!.alreadyReadCount,
+      currentUserBook 
+    });
+  }
+
+  async invalidateBookCache(bookId: number): Promise<void> {
+    const cacheKey = `book:${bookId}:details-counters`;
+    try {
+      await this.redisClient.del(cacheKey);
+    } catch (err) {
+      console.error(`Failed to invalidate cache for book ${bookId}:`, err);
+    }
+  }
 
   async create(data: CreateBookRequest): Promise<BookResponse> {
     const coverImageUrl =
@@ -111,31 +176,7 @@ export class BookService {
     return new BookResponse(book);
   }
 
-  async findDetails(id: number, userId: number): Promise<BookDetailsResponse> {
-    const book = await this.findBookEntity(id);
-
-    const [reviewsCount, commentsCount, ratingRaw, currentUserBook] =
-      await Promise.all([
-        this.reviewRepository.count({ where: { bookId: id } }),
-        this.commentRepository.count({ where: { bookId: id } }),
-        this.reviewRepository
-          .createQueryBuilder('review')
-          .select('COALESCE(AVG(review.rating), 0)', 'averageRating')
-          .where('review.bookId = :bookId', { bookId: id })
-          .getRawOne<{ averageRating: string }>(),
-        this.userBookRepository.findOne({
-          where: { bookId: id, userId },
-        }),
-      ]);
-
-    return new BookDetailsResponse({
-      book,
-      reviewsCount,
-      commentsCount,
-      averageRating: Number(ratingRaw?.averageRating ?? 0),
-      currentUserBook,
-    });
-  }
+  
 
   async update(id: number, data: UpdateBookRequest): Promise<BookResponse> {
     const book = await this.findBookEntity(id);
@@ -165,6 +206,7 @@ export class BookService {
       await userBookRepo.delete({ bookId: id });
       await bookRepo.delete({ id });
     });
+    await this.invalidateBookCache(id);
     return new BookResponse(book);
   }
 
@@ -211,6 +253,7 @@ export class BookService {
     const thumbnail = volumes[0]?.volumeInfo?.imageLinks?.thumbnail;
     return thumbnail || null;
   }
+  
 
   private async searchGoogleBooksApi(
     query: string,
@@ -263,5 +306,35 @@ export class BookService {
     }
 
     await commentRepository.remove(comment);
+  }
+
+  private async getDetailsCountersFromDB(bookId: number): Promise<Details> {
+    const [reviewsAndRating, commentsCount, userBookStats] = await Promise.all([
+      this.reviewRepository
+        .createQueryBuilder('review')
+        .select('COUNT(review.id)', 'count')
+        .addSelect('COALESCE(AVG(review.rating), 0)', 'averageRating')
+        .where('review.bookId = :bookId', { bookId })
+        .getRawOne<{ count: string; averageRating: string }>(),
+
+      this.commentRepository.count({ where: { bookId } }),
+
+      this.userBookRepository
+        .createQueryBuilder('ub')
+        .select("COUNT(CASE WHEN ub.status = 'currentlyReading' THEN 1 END)", 'reading')
+        .addSelect("COUNT(CASE WHEN ub.status = 'wantToRead' THEN 1 END)", 'want')
+        .addSelect("COUNT(CASE WHEN ub.status = 'read' THEN 1 END)", 'read')
+        .where('ub.bookId = :bookId', { bookId })
+        .getRawOne<{ reading: string; want: string; read: string }>(),
+    ]);
+
+    return {
+      reviewsCount: Number(reviewsAndRating?.count ?? 0),
+      averageRating: Number(reviewsAndRating?.averageRating ?? 0),
+      commentsCount: Number(commentsCount),
+      readRightNowCount: Number(userBookStats?.reading ?? 0),
+      wantToReadCount: Number(userBookStats?.want ?? 0),
+      alreadyReadCount: Number(userBookStats?.read ?? 0),
+    };
   }
 }

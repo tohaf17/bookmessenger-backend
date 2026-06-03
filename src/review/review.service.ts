@@ -12,12 +12,14 @@ import { UpdateReviewRequest } from './requests/update-review.request';
 import { ReviewResponse } from './responses/review.response';
 import { Review } from './review.entity';
 import { UserRole } from '../user/user-role.enum';
+import { BookService } from '../book/book.service';
 
 @Injectable()
 export class ReviewService {
   constructor(
     @InjectRepository(Review)
     private readonly reviewRepository: Repository<Review>,
+    private readonly bookService: BookService,
   ) {}
 
   async create(
@@ -31,6 +33,7 @@ export class ReviewService {
     });
 
     await this.reviewRepository.save(review);
+    await this.bookService.invalidateBookCache(data.bookId);
     return new ReviewResponse(await this.findReviewEntity(review.id));
   }
 
@@ -64,11 +67,11 @@ export class ReviewService {
   }
 
   async like(id: number): Promise<ReviewResponse> {
-    return this.updateHelpfulness(id, 'likesCount');
+    return this.updateLikes(id, 'likesCount');
   }
 
   async dislike(id: number): Promise<ReviewResponse> {
-    return this.updateHelpfulness(id, 'dislikesCount');
+    return this.updateLikes(id, 'dislikesCount');
   }
 
   async update(
@@ -80,6 +83,7 @@ export class ReviewService {
     this.assertOwner(review, userId);
     Object.assign(review, data);
     await this.reviewRepository.save(review);
+    await this.bookService.invalidateBookCache(review.bookId);
     return new ReviewResponse(await this.findReviewEntity(id));
   }
 
@@ -87,16 +91,18 @@ export class ReviewService {
     const review = await this.findReviewEntity(id);
     this.assertOwnerOrAdmin(review, userId, userRole);
     await this.reviewRepository.remove(review);
+    await this.bookService.invalidateBookCache(review.bookId);
     return new ReviewResponse(review);
   }
 
-  private async updateHelpfulness(
+  private async updateLikes(
     id: number,
     field: 'likesCount' | 'dislikesCount',
   ): Promise<ReviewResponse> {
     const review = await this.findReviewEntity(id);
     review[field] = (review[field] ?? 0) + 1;
     await this.reviewRepository.save(review);
+    await this.bookService.invalidateBookCache(review.bookId);
     return new ReviewResponse(await this.findReviewEntity(id));
   }
 

@@ -17,6 +17,15 @@ export class BookDetailsResponse {
   @ApiProperty()
   averageRating!: number;
 
+  @ApiProperty()
+  readRightNowCount!: number;
+
+  @ApiProperty()
+  wantToReadCount!: number;
+
+  @ApiProperty()
+  alreadyReadCount!: number;
+
   @ApiPropertyOptional({ type: UserBookResponse, nullable: true })
   currentUserBook?: UserBookResponse | null;
 
@@ -25,12 +34,18 @@ export class BookDetailsResponse {
     reviewsCount: number;
     commentsCount: number;
     averageRating: number;
+    readRightNowCount: number;
+    wantToReadCount: number;
+    alreadyReadCount: number;
     currentUserBook?: UserBook | null;
   }) {
     this.book = new BookResponse(data.book);
     this.reviewsCount = data.reviewsCount;
     this.commentsCount = data.commentsCount;
     this.averageRating = data.averageRating;
+    this.readRightNowCount = data.readRightNowCount;
+    this.wantToReadCount = data.wantToReadCount;
+    this.alreadyReadCount = data.alreadyReadCount;
     this.currentUserBook = data.currentUserBook
       ? new UserBookResponse(data.currentUserBook)
       : null;

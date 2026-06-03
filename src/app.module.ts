@@ -35,7 +35,7 @@ import path from 'path';
           password: String(configService.get('DATABASE_PASSWORD') ?? ''), 
           database: configService.get<string>('DATABASE_NAME'),
           autoLoadEntities: true,
-          synchronize: !isProduction, 
+          synchronize: true, 
           logging: isProduction ? ['error'] : ['query', 'error'],
           ssl: {
             rejectUnauthorized: false,

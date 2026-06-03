@@ -22,6 +22,10 @@ import { Comment } from '../comment/comment.entity';
 import { Tracker } from '../tracker/tracker.entity';
 import { TrackerItem } from '../trackerItem/trackerItem.entity';
 import { UserStatsResponse } from './responses/user-stats.response';
+import {
+  DEFAULT_ADMIN_EMAIL,
+  DEFAULT_ADMIN_PASSWORD,
+} from './user.constants';
 
 type CreateUserData = {
   email: string;
@@ -30,13 +34,10 @@ type CreateUserData = {
   surname: string;
   language?:string,
   avatarUrl?: string;
-  role?: UserRole;
 };
 
 @Injectable()
 export class UserService {
-  private readonly defaultAdminEmail = 'admin@bookmessenger';
-
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -64,20 +65,21 @@ export class UserService {
   }
 
   async createUser(data: CreateUserData): Promise<User> {
-    const exsitingUser=await this.getByEmail(data.email.toLowerCase());
+    const normalizedEmail = data.email.toLowerCase();
+    const exsitingUser = await this.getByEmail(normalizedEmail);
 
-    if(exsitingUser){
+    if (exsitingUser) {
       throw new ConflictException(`User with email ${data.email} already exists`);
     }
-    
-    
+
     const hashedPassword = await bcrypt.hash(data.password, 10);
+    const isDefaultAdmin = normalizedEmail === DEFAULT_ADMIN_EMAIL;
     const user = this.userRepository.create({
       ...data,
-      email: data.email.toLowerCase(),
+      email: normalizedEmail,
       password: hashedPassword,
       language: data.language,
-      role: data.role ?? UserRole.User,
+      role: isDefaultAdmin ? UserRole.Admin : UserRole.User,
       createdAt: new Date(),
     });
 
@@ -303,13 +305,12 @@ export class UserService {
   }
 
   private async ensureDefaultAdmin(): Promise<void> {
-    const adminPassword = 'adminpassword123';
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    const hashedPassword = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
 
     await this.dataSource.transaction(async (manager) => {
       const userRepo = manager.getRepository(User);
       const existingAdmin = await userRepo.findOne({
-        where: { email: this.defaultAdminEmail },
+        where: { email: DEFAULT_ADMIN_EMAIL },
       });
 
       if (existingAdmin) {
@@ -322,7 +323,7 @@ export class UserService {
       } else {
         await userRepo.save(
           userRepo.create({
-            email: this.defaultAdminEmail,
+            email: DEFAULT_ADMIN_EMAIL,
             password: hashedPassword,
             name: 'Admin',
             surname: 'BookMessenger',
@@ -337,7 +338,7 @@ export class UserService {
         where: { role: UserRole.Admin },
       });
 
-      const staleAdmins = otherAdmins.filter((user) => user.email !== this.defaultAdminEmail);
+      const staleAdmins = otherAdmins.filter((user) => user.email !== DEFAULT_ADMIN_EMAIL);
       for (const staleAdmin of staleAdmins) {
         staleAdmin.role = UserRole.User;
         await userRepo.save(staleAdmin);
@@ -376,7 +377,7 @@ export class UserService {
   }
 
   private assertNotDefaultAdmin(user: User): void {
-    if (user.email === this.defaultAdminEmail) {
+    if (user.email === DEFAULT_ADMIN_EMAIL) {
       throw new ForbiddenException('Default admin account cannot be modified');
     }
   }

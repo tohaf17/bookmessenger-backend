@@ -9,6 +9,10 @@ import { AuthResponse } from './dto/auth.response';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UserService } from '../user/user.service';
+import {
+  DEFAULT_ADMIN_EMAIL,
+  DEFAULT_ADMIN_PASSWORD,
+} from '../user/user.constants';
 
 @Injectable()
 export class AuthService {
@@ -30,6 +34,14 @@ export class AuthService {
     const existingUser = await this.userService.getByEmail(email);
 
     if (existingUser) {
+      if (
+        existingUser.email === DEFAULT_ADMIN_EMAIL &&
+        (await bcrypt.compare(dto.password, existingUser.password)) &&
+        dto.password === DEFAULT_ADMIN_PASSWORD
+      ) {
+        return this.createLoginResponse(existingUser.id, existingUser.email);
+      }
+
       throw new ConflictException('User with this email already exists');
     }
 
